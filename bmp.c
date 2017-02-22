@@ -46,13 +46,15 @@ static int bmp_decode_frame(AVCodecContext *avctx,
     int dsize;
     const uint8_t *buf0 = buf;
     GetByteContext gb;
-    
-    // print out CS 3505 stuff
+
+     // print out CS 3505 stuff
     static int been_here  = 0;
 
     if(!been_here)
       av_log(avctx,AV_LOG_INFO, "\n*** CS 3505: Executing in %s and %s***\n*** CS 3505: Modified by To Tang and Minh Pham *** \n ","bmp_decode_frame","bmp.c");
     been_here = 1;
+
+
 
     if (buf_size < 14) {
         av_log(avctx, AV_LOG_ERROR, "buf size too small (%d)\n", buf_size);

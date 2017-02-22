@@ -1318,14 +1318,12 @@ static int decode_frame_png(AVCodecContext *avctx,
     AVFrame *p;
     int64_t sig;
     int ret;
-
-
+    
     static int been_here  = 0;
   
     if(!been_here)
       av_log(avctx,AV_LOG_INFO, "\n*** CS 3505: Executing in %s and %s***\n*** CS 3505: Modified by To Tang and Minh Pham *** \n ","decode_frame_png","pngdec.c");
     been_here = 1;
-
 
     ff_thread_release_buffer(avctx, &s->last_picture);
     FFSWAP(ThreadFrame, s->picture, s->last_picture);
