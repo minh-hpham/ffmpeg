@@ -30,6 +30,8 @@
 static av_cold int spff_encode_init(AVCodecContext *avctx){
   if(avctx->pix_fmt == AV_PIX_FMT_BGR24)
     // no need for color table
+    // PROB: 3 bits per pixel (require is 1 bit)
+    // can do compression if desire.
     avctx->bits_per_coded_sample = 24;
   else {
     av_log(avctx, AV_LOG_INFO, "unsupported pixel format\n");
@@ -131,11 +133,11 @@ AVCodec ff_spff_encoder = {
   .id             = AV_CODEC_ID_SPFF,
   .init           = spff_encode_init,
   .encode2        = spff_encode_frame,
-  .pix_fmts       = (const enum AVPixelFormat[]){
-    AV_PIX_FMT_BGRA, AV_PIX_FMT_BGR24,
+  .pix_fmts       = (const enum AVPixelFormat[]){AV_PIX_FMT_BGR24,AV_PIX_FMT_NONE
+						 /* AV_PIX_FMT_BGRA, AV_PIX_FMT_BGR24,
     AV_PIX_FMT_RGB565, AV_PIX_FMT_RGB555, AV_PIX_FMT_RGB444,
     AV_PIX_FMT_RGB8, AV_PIX_FMT_BGR8, AV_PIX_FMT_RGB4_BYTE, AV_PIX_FMT_BGR4_BYTE, AV_PIX_FMT_GRAY8, AV_PIX_FMT_PAL8,
     AV_PIX_FMT_MONOBLACK,
-    AV_PIX_FMT_NONE
+    AV_PIX_FMT_NONE*/
   },
 };
