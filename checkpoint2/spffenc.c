@@ -27,10 +27,6 @@
 #include "spff.h"
 #include "internal.h"
 
-typedef struct{
-  AVFrame picture;
-  uint8_t *buf;
-}SPFFContext;
 static av_cold int spff_encode_init(AVCodecContext *avctx){
   if(avctx->pix_fmt == AV_PIX_FMT_BGR24)
   {
@@ -38,12 +34,6 @@ static av_cold int spff_encode_init(AVCodecContext *avctx){
     // PROB: 3 bits per pixel (require is 1 bit)
     // can do compression if desire.
     avctx->bits_per_coded_sample = 24;
-#if FF_API_CODED_FRAME
-    FF_DISABLE_DEPRECATION_WARNINGS
-      avctx->coded_frame->pict_type = AV_PICTURE_TYPE_I;
-    avctx->coded_frame->key_frame = 1;
-    FF_ENABLE_DEPRECATION_WARNINGS
-#endif
   }
   else {
     av_log(avctx, AV_LOG_INFO, "unsupported pixel format\n");
@@ -55,7 +45,6 @@ static av_cold int spff_encode_init(AVCodecContext *avctx){
 static int spff_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
 			     const AVFrame *pict, int *got_packet)
 {
-  SPFFContext *s = avctx->priv_data;
   const AVFrame * const p = pict;
   int n_bytes_image, n_bytes_per_row, n_bytes, i, hsize, ret;
   const uint32_t *pal = NULL;
@@ -63,17 +52,20 @@ static int spff_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
   int bit_count = avctx->bits_per_coded_sample;
   uint8_t *ptr, *buf;
 
-  
-
+#if FF_API_CODED_FRAME
+  FF_DISABLE_DEPRECATION_WARNINGS
+    avctx->coded_frame->pict_type = AV_PICTURE_TYPE_I;
+  avctx->coded_frame->key_frame = 1;
+  FF_ENABLE_DEPRECATION_WARNINGS
+#endif
   if (pal && !pal_entries) pal_entries = 1 << bit_count;
-  n_bytes_per_row = ((int64_t)avctx->width * (int64_t)bit_count + 7LL) >> 3LL;
-  pad_bytes_per_row = (4 - n_bytes_per_row) & 3;
-  n_bytes_image = avctx->height * (n_bytes_per_row + pad_bytes_per_row);
-
+   n_bytes_per_row = ((int64_t)avctx->width * (int64_t)3);
+   pad_bytes_per_row = (4 - n_bytes_per_row) & 3;
+   n_bytes_image = avctx->height * (n_bytes_per_row + pad_bytes_per_row);
   // STRUCTURE.field refer to the MSVC documentation for BITMAPFILEHEADER
   // and related pages.
-#define SIZE_SPFFFILEHEADER 14
-#define SIZE_SPFFINFOHEADER 40
+#define SIZE_SPFFFILEHEADER 10
+#define SIZE_SPFFINFOHEADER 24
   hsize = SIZE_SPFFFILEHEADER + SIZE_SPFFINFOHEADER + (pal_entries << 2);
   n_bytes = n_bytes_image + hsize;
    //Check AVPacket size and/or allocate data.
@@ -83,12 +75,7 @@ static int spff_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
   bytestream_put_byte(&buf, 'S');                   // BITMAPFILEHEADER.bfType
   bytestream_put_byte(&buf, 'F');                   // do.
   bytestream_put_le32(&buf, n_bytes);               // BITMAPFILEHEADER.bfSize
-  bytestream_put_le16(&buf, 0);                     // BITMAPFILEHEADER.bfReserved1
-  bytestream_put_le16(&buf, 0);                     // BITMAPFILEHEADER.bfReserved2
-  //Offset to start of Pixel Data
   bytestream_put_le32(&buf, hsize);                 // BITMAPFILEHEADER.bfOffBits
-  //should keep using Windows BMP format
-  // because it is more widely supported
   bytestream_put_le32(&buf, SIZE_SPFFINFOHEADER);   // BITMAPINFOHEADER.biSize
   bytestream_put_le32(&buf, avctx->width);          // BITMAPINFOHEADER.biWidth
   bytestream_put_le32(&buf, avctx->height);         // BITMAPINFOHEADER.biHeight
@@ -101,11 +88,6 @@ static int spff_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
   // maybe 0 for uncompressed images
   bytestream_put_le32(&buf, 0); 
   //bytestream_put_le32(&buf, n_bytes_image);         // BITMAPINFOHEADER.biSizeImage
-  bytestream_put_le32(&buf, 0);                     // BITMAPINFOHEADER.biXPelsPerMeter
-  bytestream_put_le32(&buf, 0);                     // BITMAPINFOHEADER.biYPelsPerMeter
-  bytestream_put_le32(&buf, 0);                     // BITMAPINFOHEADER.biClrUsed
-  bytestream_put_le32(&buf, 0);                     // BITMAPINFOHEADER.biClrImportant
-
   for (i = 0; i < pal_entries; i++)
     bytestream_put_le32(&buf, pal[i] & 0xFFFFFF);
   // BMP files are bottom-to-top so we start from the end...
@@ -125,7 +107,6 @@ static int spff_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
   pkt->flags |= AV_PKT_FLAG_KEY;
   *got_packet = 1;
   return 0;
-  // return n_bytes;
 }
 
 AVCodec ff_spff_encoder = {
@@ -135,11 +116,5 @@ AVCodec ff_spff_encoder = {
   .id             = AV_CODEC_ID_SPFF,
   .init           = spff_encode_init,
   .encode2        = spff_encode_frame,
-  .pix_fmts       = (const enum AVPixelFormat[]){AV_PIX_FMT_BGR24,AV_PIX_FMT_NONE
-						 /* AV_PIX_FMT_BGRA, AV_PIX_FMT_BGR24,
-    AV_PIX_FMT_RGB565, AV_PIX_FMT_RGB555, AV_PIX_FMT_RGB444,
-    AV_PIX_FMT_RGB8, AV_PIX_FMT_BGR8, AV_PIX_FMT_RGB4_BYTE, AV_PIX_FMT_BGR4_BYTE, AV_PIX_FMT_GRAY8, AV_PIX_FMT_PAL8,
-    AV_PIX_FMT_MONOBLACK,
-    AV_PIX_FMT_NONE*/
-  },
+  .pix_fmts       = (const enum AVPixelFormat[]){AV_PIX_FMT_BGR24,AV_PIX_FMT_NONE },
 };
