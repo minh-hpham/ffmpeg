@@ -27,12 +27,24 @@
 #include "spff.h"
 #include "internal.h"
 
+typedef struct{
+  AVFrame picture;
+  uint8_t *buf;
+}SPFFContext;
 static av_cold int spff_encode_init(AVCodecContext *avctx){
   if(avctx->pix_fmt == AV_PIX_FMT_BGR24)
+  {
     // no need for color table
     // PROB: 3 bits per pixel (require is 1 bit)
     // can do compression if desire.
     avctx->bits_per_coded_sample = 24;
+#if FF_API_CODED_FRAME
+    FF_DISABLE_DEPRECATION_WARNINGS
+      avctx->coded_frame->pict_type = AV_PICTURE_TYPE_I;
+    avctx->coded_frame->key_frame = 1;
+    FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+  }
   else {
     av_log(avctx, AV_LOG_INFO, "unsupported pixel format\n");
     return AVERROR(EINVAL);
@@ -43,45 +55,41 @@ static av_cold int spff_encode_init(AVCodecContext *avctx){
 static int spff_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
 			     const AVFrame *pict, int *got_packet)
 {
+  SPFFContext *s = avctx->priv_data;
   const AVFrame * const p = pict;
-  int n_bytes_image, n_bytes_per_row, n_bytes, i, n, hsize, ret;
+  int n_bytes_image, n_bytes_per_row, n_bytes, i, hsize, ret;
   const uint32_t *pal = NULL;
   int pad_bytes_per_row, pal_entries = 0, compression = SPFF_RGB;
   int bit_count = avctx->bits_per_coded_sample;
   uint8_t *ptr, *buf;
 
-#if FF_API_CODED_FRAME
-  FF_DISABLE_DEPRECATION_WARNINGS
-    avctx->coded_frame->pict_type = AV_PICTURE_TYPE_I;
-  avctx->coded_frame->key_frame = 1;
-  FF_ENABLE_DEPRECATION_WARNINGS
-#endif
-    if (pal && !pal_entries) pal_entries = 1 << bit_count;
+  
+
+  if (pal && !pal_entries) pal_entries = 1 << bit_count;
   n_bytes_per_row = ((int64_t)avctx->width * (int64_t)bit_count + 7LL) >> 3LL;
   pad_bytes_per_row = (4 - n_bytes_per_row) & 3;
   n_bytes_image = avctx->height * (n_bytes_per_row + pad_bytes_per_row);
 
   // STRUCTURE.field refer to the MSVC documentation for BITMAPFILEHEADER
   // and related pages.
-#define SIZE_BITMAPFILEHEADER 14
-#define SIZE_BITMAPINFOHEADER 40
-  hsize = SIZE_BITMAPFILEHEADER + SIZE_BITMAPINFOHEADER + (pal_entries << 2);
+#define SIZE_SPFFFILEHEADER 14
+#define SIZE_SPFFINFOHEADER 40
+  hsize = SIZE_SPFFFILEHEADER + SIZE_SPFFINFOHEADER + (pal_entries << 2);
   n_bytes = n_bytes_image + hsize;
+   //Check AVPacket size and/or allocate data.
   if ((ret = ff_alloc_packet2(avctx, pkt, n_bytes, 0)) < 0)
     return ret;
   buf = pkt->data;
   bytestream_put_byte(&buf, 'S');                   // BITMAPFILEHEADER.bfType
   bytestream_put_byte(&buf, 'F');                   // do.
   bytestream_put_le32(&buf, n_bytes);               // BITMAPFILEHEADER.bfSize
-  //these 2 lines below should be removed
-  // because they have no uses
   bytestream_put_le16(&buf, 0);                     // BITMAPFILEHEADER.bfReserved1
   bytestream_put_le16(&buf, 0);                     // BITMAPFILEHEADER.bfReserved2
   //Offset to start of Pixel Data
   bytestream_put_le32(&buf, hsize);                 // BITMAPFILEHEADER.bfOffBits
   //should keep using Windows BMP format
   // because it is more widely supported
-  bytestream_put_le32(&buf, SIZE_BITMAPINFOHEADER); // BITMAPINFOHEADER.biSize
+  bytestream_put_le32(&buf, SIZE_SPFFINFOHEADER);   // BITMAPINFOHEADER.biSize
   bytestream_put_le32(&buf, avctx->width);          // BITMAPINFOHEADER.biWidth
   bytestream_put_le32(&buf, avctx->height);         // BITMAPINFOHEADER.biHeight
   bytestream_put_le16(&buf, 1);                     // BITMAPINFOHEADER.biPlanes
@@ -104,12 +112,6 @@ static int spff_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
   ptr = p->data[0] + (avctx->height - 1) * p->linesize[0];
   buf = pkt->data + hsize;
   for(i = 0; i < avctx->height; i++) {
-    /* if (bit_count == 16) {
-       const uint16_t *src = (const uint16_t *) ptr;
-       uint16_t *dst = (uint16_t *) buf;
-       for(n = 0; n < avctx->width; n++)
-       AV_WL16(dst + n, src[n]);
-       } else*/
     //bit_count is always 24
     {
       memcpy(buf, ptr, n_bytes_per_row);
