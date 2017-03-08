@@ -24,17 +24,13 @@
 #include "libavutil/avassert.h"
 #include "avcodec.h"
 #include "bytestream.h"
-#include "spff.h"
 #include "internal.h"
 
 static av_cold int spff_encode_init(AVCodecContext *avctx){
-  if(avctx->pix_fmt == AV_PIX_FMT_BGR24)
-  {
-    // no need for color table
-    // PROB: 3 bits per pixel (require is 1 bit)
-    // can do compression if desire.
-    avctx->bits_per_coded_sample = 24;
-  }
+  if(avctx->pix_fmt == AV_PIX_FMT_RGB8||avctx->pix_fmt == AV_PIX_FMT_BGR8)
+    {
+      avctx->bits_per_coded_sample = 8;
+    }
   else {
     av_log(avctx, AV_LOG_INFO, "unsupported pixel format\n");
     return AVERROR(EINVAL);
@@ -48,7 +44,8 @@ static int spff_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
   const AVFrame * const p = pict;
   int n_bytes_image, n_bytes_per_row, n_bytes, i, hsize, ret;
   const uint32_t *pal = NULL;
-  int pad_bytes_per_row, pal_entries = 0, compression = SPFF_RGB;
+  uint32_t palette256[256];
+  int pad_bytes_per_row, pal_entries = 0;
   int bit_count = avctx->bits_per_coded_sample;
   uint8_t *ptr, *buf;
 
@@ -58,17 +55,22 @@ static int spff_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
   avctx->coded_frame->key_frame = 1;
   FF_ENABLE_DEPRECATION_WARNINGS
 #endif
+
+  av_assert1(bit_count == 8);
+  avpriv_set_systematic_pal2(palette256, avctx->pix_fmt);
+  pal = palette256;
+
   if (pal && !pal_entries) pal_entries = 1 << bit_count;
-   n_bytes_per_row = ((int64_t)avctx->width * (int64_t)3);
-   pad_bytes_per_row = (4 - n_bytes_per_row) & 3;
-   n_bytes_image = avctx->height * (n_bytes_per_row + pad_bytes_per_row);
+  n_bytes_per_row = ((int64_t)avctx->width * (int64_t)1);
+  pad_bytes_per_row = (4 - n_bytes_per_row) & 3;
+  n_bytes_image = avctx->height * (n_bytes_per_row + pad_bytes_per_row);
   // STRUCTURE.field refer to the MSVC documentation for BITMAPFILEHEADER
   // and related pages.
 #define SIZE_SPFFFILEHEADER 10
-#define SIZE_SPFFINFOHEADER 24
+#define SIZE_SPFFINFOHEADER 20
   hsize = SIZE_SPFFFILEHEADER + SIZE_SPFFINFOHEADER + (pal_entries << 2);
   n_bytes = n_bytes_image + hsize;
-   //Check AVPacket size and/or allocate data.
+  //Check AVPacket size and/or allocate data.
   if ((ret = ff_alloc_packet2(avctx, pkt, n_bytes, 0)) < 0)
     return ret;
   buf = pkt->data;
@@ -83,10 +85,6 @@ static int spff_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
   // we choose to represent each pixel with 
   // 3 bytes for red,green,blue. bit_count should be 24
   bytestream_put_le16(&buf, bit_count);             // BITMAPINFOHEADER.biBitCount
-  // choose not to compress-> compression=0
-  bytestream_put_le32(&buf, compression);           // BITMAPINFOHEADER.biCompression
-  // maybe 0 for uncompressed images
-  bytestream_put_le32(&buf, 0); 
   //bytestream_put_le32(&buf, n_bytes_image);         // BITMAPINFOHEADER.biSizeImage
   for (i = 0; i < pal_entries; i++)
     bytestream_put_le32(&buf, pal[i] & 0xFFFFFF);
@@ -94,10 +92,7 @@ static int spff_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
   ptr = p->data[0] + (avctx->height - 1) * p->linesize[0];
   buf = pkt->data + hsize;
   for(i = 0; i < avctx->height; i++) {
-    //bit_count is always 24
-    {
-      memcpy(buf, ptr, n_bytes_per_row);
-    }
+    memcpy(buf, ptr, n_bytes_per_row);
     buf += n_bytes_per_row;
     memset(buf, 0, pad_bytes_per_row);
     buf += pad_bytes_per_row;
@@ -116,5 +111,5 @@ AVCodec ff_spff_encoder = {
   .id             = AV_CODEC_ID_SPFF,
   .init           = spff_encode_init,
   .encode2        = spff_encode_frame,
-  .pix_fmts       = (const enum AVPixelFormat[]){AV_PIX_FMT_BGR24,AV_PIX_FMT_NONE },
+  .pix_fmts       = (const enum AVPixelFormat[]){ AV_PIX_FMT_RGB8, AV_PIX_FMT_BGR8,AV_PIX_FMT_NONE },
 };
